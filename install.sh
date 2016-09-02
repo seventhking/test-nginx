@@ -7,7 +7,7 @@ if [ ! -d "nginx" ]; then
 fi
 
 cd ${pwd}/dependences/nginx-1.8.1
-./configure --prefix=${pwd}/nginx
+./configure --prefix=${pwd}/nginx --with-http_gunzip_module
 
 processor_num=`cat /proc/cpuinfo |grep processor |wc -l`
 
