@@ -1,8 +1,14 @@
-#include "../core/ngx_config.h"
-#include "../core/ngx_core.h"
-#include "../core/ngx_conf_file.h"
-#include "../http/ngx_http_config.h"
-#include "../http/ngx_http_request.h"
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_conf_file.h>
+#include <ngx_http_config.h>
+#include <ngx_http_request.h>
+
+/* #include "../core/ngx_config.h" */
+/* #include "../core/ngx_core.h" */
+/* #include "../core/ngx_conf_file.h" */
+/* #include "../http/ngx_http_config.h" */
+/* #include "../http/ngx_http_request.h" */
 
 static ngx_int_t ngx_http_mytest_handler(ngx_http_request_t *r)
 {

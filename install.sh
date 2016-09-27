@@ -1,13 +1,9 @@
 #!/bin/bash
 
 pwd=`pwd`
-if [ ! -d "nginx" ]; then
-    cd ${pwd}/dependences
-    tar -xvzf nginx-1.10.1.tar.gz
-fi
 
-cd ${pwd}/dependences/nginx-1.10.1
-./configure --prefix=${pwd}/nginx --with-http_gunzip_module
+cd ${pwd}/nginx-1.10.1
+./configure --prefix=${pwd}/nginx --with-http_gunzip_module --add-module=${pwd}/nginx-1.10.1/src/my-module
 
 processor_num=`cat /proc/cpuinfo |grep processor |wc -l`
 
