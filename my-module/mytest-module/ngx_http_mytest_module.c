@@ -23,6 +23,20 @@ typedef struct {
   ngx_path_t       *my_path;
 } ngx_http_mytest_conf_t;
 
+static ngx_conf_enum_t test_enums[] = {
+  {ngx_string("apple"), 1},
+  {ngx_string("banana"), 2},
+  {ngx_string("orange"), 3},
+  {ngx_null_string, 0}
+};
+
+static ngx_conf_bitmask_t test_bitmasks[] = {
+  {ngx_string("good"), 0x0002},
+  {ngx_string("better"), 0x0004},
+  {ngx_string("best"), 0x0008},
+  {ngx_null_string, 0}
+}
+
 static void *ngx_http_mytest_create_loc_conf(ngx_conf_t *cf)
 {
   ngx_http_mytest_conf_t *mycf;
@@ -190,6 +204,38 @@ static ngx_command_t ngx_http_mytest_command[] = {
     ngx_conf_set_bufs_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_mytest_conf_t, my_bufs),
+    NULL
+  },
+  {
+    ngx_string("test_enum"),
+    NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
+    ngx_conf_set_enum_slot,
+    NGX_HTTP_LOC_CONF_OFFSET,
+    offsetof(ngx_http_mytest_conf_t, my_enum_seq),
+    test_enum
+  },
+  {
+    ngx_string("test_bitmask"),
+    NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
+    ngx_conf_set_bitmask_slot,
+    NGX_HTTP_LOC_CONF_OFFSET,
+    offsetof(ngx_http_mytest_conf_t, my_bitmask),
+    test_bitmasks
+  },
+  {
+    ngx_string("test_access"),
+    NGX_HTTP_LOC_CONF | NGX_CONF_TAKE123,
+    ngx_conf_set_access_slot,
+    NGX_HTTP_LOC_CONF_OFFSET,
+    offsetof(ngx_http_mytest_conf_t, my_access),
+    NULL
+  },
+  {
+    ngx_string("test_path"),
+    NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1234,
+    ngx_conf_set_path_slot,
+    NGX_HTTP_LOC_CONF_OFFSET,
+    offsetof(ngx_http_mytest_conf_t, my_path),
     NULL
   },
   {
