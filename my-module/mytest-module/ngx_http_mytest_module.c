@@ -10,7 +10,107 @@ typedef struct {
   ngx_int_t my_config_num;
 } ngx_http_mytest_conf_t;
 
-static
+static ngx_int_t ngx_http_mytest_handler(ngx_http_request_t *r)
+{
+  //必须是GET OR HEAD方法，否则返回405 Not Allowed
+  if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD)))
+  {
+    return NGX_HTTP_NOT_ALLOWED;
+  }
+
+  //丢弃请求中的包体
+  ngx_int_t rc = ngx_http_discard_request_body(r);
+  if (rc != NGX_OK)
+  {
+    return rc;
+  }
+
+  //设置返回的Content-Type.注意，ngx_str_t有一个很方便的初始化宏ngx_string，它可以把ngx_str_t的data和len成员都设置好
+  ngx_str_t type = ngx_string("text/plain");
+  //返回的包体内容
+  ngx_str_t response = ngx_string("parse_conf");
+  //设置返回状态码
+  r->headers_out.status = NGX_HTTP_OK;
+  //响应包是有包体内容的，需要设置Content-Length长度
+  r->headers_out.content_length_n = response.len;
+  //设置Content-Type
+  r->headers_out.content_type = type;
+
+  //发送HTTP头部
+  rc = ngx_http_send_header(r);
+  if (rc == NGX_ERROR || rc > NGX_OK || r->header_only)
+  {
+    return rc;
+  }
+
+  //构造 ngx_buf_t结构体准备发送包体
+  ngx_buf_t *b;
+  b = ngx_create_temp_buf(r->pool, response.len);
+  if (b == NULL)
+  {
+    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+  }
+  //将Hello World 复制到 ngx_buf_t指向的内存中
+  ngx_memcpy(b->pos, response.data, response.len);
+  //注意, 一定要设置好last指针
+  b->last = b->pos + response.len;
+  //声明这是最后一块缓冲区
+  b->last_buf = 1;
+
+  //构造发送时的ngx_chain_t结构体
+  ngx_chain_t out;
+  //赋值ngx_buf_t
+  out.buf = b;
+  //设置next为NULL
+  out.next = NULL;
+  //发送包体，发送结束后HTTP框架会调用ngx_http_finalize_request方法结束请求
+  return ngx_http_output_filter(r, &out);
+}
+
+static char * ngx_conf_set_myconfig(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+  /*注意，参数conf就是HTTP框架传给用户的在ngx_http_mytest_create_loc_conf回调方法
+   中分配的结构体ngx_http_mytest_conf_t*/
+  ngx_http_mytest_conf_t *mycf = conf;
+  /*cf-args是1个ngx_array_t队列，它的成员都是ngx_str_t结构。
+    我们用value指向ngx_array_t的elts内容，其中value[1]就是第1个参数，同理，value[2]是第2个参数*/
+  ngx_str_t *value = cf->args->elts;
+  /**/
+  if (cf->args->nelts > 1)
+  {
+    mycf->my_config_str = value[1];
+  }
+
+  if (cf->args->nelts > 2)
+  {
+    mycf->my_config_num = ngx_atoi(value[2].data, value[2].len);
+    if (mycf->my_config_num == NGX_ERROR)
+    {
+      return "invalid number";
+    }
+  }
+
+  ngx_http_core_loc_conf_t *clcf;
+  clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+  clcf->handler = ngx_http_mytest_handler;
+
+  return NGX_CONF_OK;
+}
+
+static void *ngx_http_mytest_create_loc_conf(ngx_conf_t *cf)
+{
+  ngx_http_mytest_conf_t *mycf;
+  mycf = ngx_pcalloc(cf->pool, sizeof(ngx_http_mytest_conf_t));
+  if (mycf == NULL)
+  {
+    return NULL;
+  }
+
+  mycf->my_config_num = NGX_CONF_UNSET;
+
+  return mycf;
+}
+
 
 typedef struct {
   ngx_str_t        my_str;
@@ -41,9 +141,9 @@ static ngx_conf_bitmask_t test_bitmasks[] = {
   {ngx_string("better"), 0x0004},
   {ngx_string("best"), 0x0008},
   {ngx_null_string, 0}
-}
+};
 
-static void *ngx_http_mytest_create_loc_conf(ngx_conf_t *cf)
+static void *ngx_http_myexample_create_loc_conf(ngx_conf_t *cf)
 {
   ngx_http_myexample_conf_t *mycf;
   mycf = ngx_pcalloc(cf->pool, sizeof(ngx_http_myexample_conf_t));
@@ -64,7 +164,7 @@ static void *ngx_http_mytest_create_loc_conf(ngx_conf_t *cf)
   return mycf;
 }
 
-static ngx_int_t ngx_http_mytest_handler(ngx_http_request_t *r)
+static ngx_int_t ngx_http_myexample_handler(ngx_http_request_t *r)
 {
   //必须是GET OR HEAD方法，否则返回405 Not Allowed
   if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD)))
@@ -126,7 +226,7 @@ static char * ngx_http_mytest(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
   ngx_http_core_loc_conf_t *clcf;
   clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
-  clcf->handler = ngx_http_mytest_handler;
+  clcf->handler = ngx_http_myexample_handler;
 
   return NGX_CONF_OK;
 }
@@ -279,6 +379,7 @@ ngx_module_t ngx_http_mytest_module = {
   NGX_MODULE_V1,
   &ngx_http_mytest_module_ctx,
   ngx_http_mytest_command,
+  //  ngx_http_myexample_command,
   NGX_HTTP_MODULE,
   NULL,
   NULL,
