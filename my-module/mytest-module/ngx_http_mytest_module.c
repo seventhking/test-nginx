@@ -72,7 +72,7 @@ static char * ngx_conf_set_myconfig(ngx_conf_t *cf, ngx_command_t *cmd, void *co
   /*注意，参数conf就是HTTP框架传给用户的在ngx_http_mytest_create_loc_conf回调方法
    中分配的结构体ngx_http_mytest_conf_t*/
   ngx_http_mytest_conf_t *mycf = conf;
-  /*cf-args是1个ngx_array_t队列，它的成员都是ngx_str_t结构。
+  /*cf->args是1个ngx_array_t队列，它的成员都是ngx_str_t结构。
     我们用value指向ngx_array_t的elts内容，其中value[1]就是第1个参数，同理，value[2]是第2个参数*/
   ngx_str_t *value = cf->args->elts;
   /**/
@@ -90,9 +90,9 @@ static char * ngx_conf_set_myconfig(ngx_conf_t *cf, ngx_command_t *cmd, void *co
     }
   }
 
-  ngx_http_core_loc_conf_t *clcf;
-  clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
-  clcf->handler = ngx_http_mytest_handler;
+  /* ngx_http_core_loc_conf_t *clcf; */
+  /* clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module); */
+  /* clcf->handler = ngx_http_mytest_handler; */
 
   return NGX_CONF_OK;
 }
@@ -109,6 +109,15 @@ static void *ngx_http_mytest_create_loc_conf(ngx_conf_t *cf)
   mycf->my_config_num = NGX_CONF_UNSET;
 
   return mycf;
+}
+
+static char * ngx_http_mytest_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
+{
+  ngx_http_mytest_conf_t *prev = (ngx_http_mytest_conf_t *)parent;
+  ngx_http_mytest_conf_t *conf = (ngx_http_mytest_conf_t *)child;
+  ngx_conf_merge_str_value(conf->my_config_str, prev->my_config_num, "defaultstr");
+
+  return NGX_CONF_OK;
 }
 
 
