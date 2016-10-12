@@ -24,8 +24,113 @@ static ngx_int_t mytest_upstream_process_header(ngx_http_request_t *r)
   ngx_http_upstream_header_t *hh;
   ngx_http_upstream_main_conf_t *umcf;
 
-  /**/
-  umcf = ngx_
+  /*这里将upstream模块配置项ngx_http_upstream_main_conf_t取出来，目的只有一个，就是对将
+    要转发给下游客户端的HTTP响应头部进行统一处理，该结构体中存储了需要进行统一处理的HTTP头部
+    名称和回调方法*/
+  umcf = ngx_http_get_module_main_conf(r, ngx_http_upstream_module);
+
+  /*循环地解析所有的HTTP头部*/
+  for ( ;; )
+  {
+    /*HTTP框架提供了基础性的ngx_http_parse_header_line方法，它用于解析HTTP头部*/
+    rc = ngx_http_parse_header_line(r, &r->upstream->buffer, 1);
+    /*返回NGX_OK时，表示解析出一行HTTP头部*/
+    if (rc == NGX_OK)
+    {
+      /*向headers_in.headers这个ngx_list_t链表中添加HTTP头部*/
+      h = ngx_list_push(&r->upstream->headers_in.headers);
+      if (h == NULL)
+      {
+        return NGX_ERROR;
+      }
+      /*下面开始构造刚刚添加到headers链表中的HTTP头部*/
+      h->hash = r->header_hash;
+
+      h->key.len = r->header_name_end - r->header_name_start;
+      h->value.len = r->header_end - r->header_start;
+      /*必须在内存池中分配存放HTTP头部的内存空间*/
+      h->key.data = ngx_pnalloc(r->pool, h->key.len + 1 + h->value.len + 1 + h->key.len);
+      if (h->key.data == NULL)
+      {
+        return NGX_ERROR;
+      }
+
+      h->value.data = h->key.data + h->key.len + 1;
+      h->lowcase_key = h->key.data + h->key.len + 1 + h->value.len + 1;
+
+      ngx_memcpy(h->key.data, r->header_name_start, h->key.len);
+      h->key.data[h->key.len] = '\0';
+      ngx_memcpy(h->value.data, r->header_start, h->value.len);
+      h->value.data[h->value.len] = '\0';
+
+      if (h->key.len == r->lowcase_index)
+      {
+        ngx_memcpy(h->lowcase_key, r->lowcase_header, h->key.len);
+      }
+      else
+      {
+        ngx_strlow(h->lowcase_key, h->key.data, h->key.len);
+      }
+
+      /*upstream模块会对一些HTTP头部做特殊处理*/
+      hh = ngx_hash_find(&umcf->headers_in_hash, h->hash, h->lowcase_key, h->key.len);
+
+      if (hh && hh->handler(r, h, hh->offset) != NGX_OK)
+      {
+        return NGX_ERROR;
+      }
+
+      continue;
+    }
+
+    /*返回NGX_HTTP_PARSE_HEADER_DONE时，表示响应中所有的HTTP头部都解析完毕，接下来再接收到的都将是HTTP宝体*/
+    if (rc == NGX_HTTP_PARSE_HEADER_DONE)
+    {
+      /*如果之前解析HTTP头部时没有发现server和date头部，那么下面会根据HTTP协议规范添加这两个头部*/
+      if (r->upstream->headers_in.server == NULL)
+      {
+        h = ngx_list_push(&r->upstream->headers_in.headers);
+        if (h == NULL)
+        {
+          return NGX_ERROR;
+        }
+
+        h->hash = ngx_hash(ngx_hash(ngx_hash(ngx_hash(ngx_hash('s', 'e'), 'r'), 'v'), 'e'), 'r');
+        ngx_str_set(&h->key, "Server");
+        ngx_str_null(&h->value);
+        h->lowcase_key = (u_char *) "server";
+      }
+
+      if (r->upstream->headers_in.date == NULL)
+      {
+        h = ngx_list_push(&r->upstream->headers_in.headers);
+        if (h == NULL)
+        {
+          return NGX_ERROR;
+        }
+
+        h->hash = ngx_hash(ngx_hash(ngx_hash('d', 'a'), 't'), 'e');
+
+        ngx_str_set(&h->key, "Date");
+        ngx_str_null(&h->value);
+        h->lowcase_key = (u_char *) "date";
+      }
+
+      return NGX_OK;
+    }
+
+    /*如果返回NGX_AGAIN，则表示状态机还没有解析到完整的HTTP头部，此时要求upstream模块继续接收新的字符流，然后
+     交由process_header回调方法解析*/
+    if (rc == NGX_AGAIN)
+    {
+      return NGX_AGAIN;
+    }
+
+    /*其他返回值都是非法的*/
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "upstream sent invalid header");
+
+    return NGX_HTTP_UPSTREAM_INVALID_HEADER;
+  }
 }
 
 static ngx_int_t mytest_process_status_line(ngx_http_request_t *r)
