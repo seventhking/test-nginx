@@ -1,6 +1,7 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 #include <ngx_config.h>
+#include <ngx_http_upstream.h>
 
 //#include <ngx_conf_file.h>
 //#include <ngx_http_config.h>
@@ -11,6 +12,122 @@ typedef struct {
 
   ngx_http_upstream_conf_t upstream;
 } ngx_http_mytest_conf_t;
+
+typedef struct {
+  ngx_http_status_t status;
+} ngx_http_mytest_ctx_t;
+
+static ngx_int_t mytest_upstream_process_header(ngx_http_request_t *r)
+{
+  ngx_int_t rc;
+  ngx_table_elt_t *h;
+  ngx_http_upstream_header_t *hh;
+  ngx_http_upstream_main_conf_t *umcf;
+
+  /**/
+  umcf = ngx_
+}
+
+static ngx_int_t mytest_process_status_line(ngx_http_request_t *r)
+{
+  size_t len;
+  ngx_int_t rc;
+  ngx_http_upstream_t *u;
+
+  /*上下文中才会保存多次解析HTTP响应行的状态，下面首先取出请求的上下文*/
+  ngx_http_mytest_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_mytest_module);
+  if (ctx == NULL)
+  {
+    return NGX_ERROR;
+  }
+
+  u = r->upstream;
+
+  /*HTTP框架提供的ngx_http_parse_status_line方法可以解析HTTP响应行，它的输入就是收到的字符流
+    和上下文种的ngx_http_status_t结构*/
+  rc = ngx_http_parse_status_line(r, &u->buffer, &ctx->status);
+  /*返回NGX_AGAIN时，表示还没有解析出完整的HTTP响应行，需要接收更多的字符流再进行解析*/
+  if (rc == NGX_AGAIN)
+  {
+    return rc;
+  }
+  /*返回NGX_ERROR时，表示没有接收到合法的HTTP响应行*/
+  if (rc == NGX_ERROR)
+  {
+    ngx_log_error();
+
+    r->http_version = NGX_HTTP_VERSION_9;
+    u->state->status = NGX_HTTP_OK;
+
+    return NGX_OK;
+  }
+
+  /*以下表示在解析到完整的HTTP响应行时，会做一些简单地赋值操作，将解析出的信息设置到r->upstream->headers_in
+    结构体中。当upstream解析完所有的包头时，会把headers_in中的成员设置到将要向下游发送的r->headers_out结构体
+    中，也就是说，现在用户向headers_in中设置的信息，最终都会发往下游客户端。为什么不直接设置r->headers_out而
+    要多此一举呢？因为upstream希望能够按照ngx_http_upstream_conf_t配置结构体中的hide_headers等成员对发往
+    下游的响应头部做统一处理*/
+  if (u->state)
+  {
+    u->state->status = ctx->status.code;
+  }
+
+  u->headers_in.status_n = ctx->status.code;
+
+  len = ctx->status.end - ctx->status.start;
+  u->headers_in.status_line.len = len;
+
+  u->headers_in.status_line.data = ngx_pnalloc(r->pool, len);
+  if (u->headers_in.status_line.data == NULL)
+  {
+    return NGX_ERROR;
+  }
+
+  ngx_memcpy(u->headers_in.status_line.data, ctx->status.start, len);
+
+  /*下一步将开始解析HTTP头部。设置process_header回调方法为mytest_upstream_process_header，之后再收到
+    的新字符流将由mytest_upstream_process_header解析*/
+  u->process_header = mytest_upstream_process_header;
+
+  /*如果本次收到的字符流除了HTTP响应行外，还有多余的字符，那么将由mytest_upstream_process_header方法解析*/
+  return mytest_upstream_process_header(r);
+}
+
+static ngx_int_t mytest_upstream_create_request(ngx_http_request_t *r)
+{
+  /*发往google上游服务器的请求很简单，就是模仿正常的搜索请求，以/search?q=...的url来发起搜索请求*/
+  static ngx_str_t backendQueryLine = ngx_string("GET /search?q=%V HTTP/1.1\r\nHost: www.google.com\r\nConnection: close\r\n\r\n");
+  ngx_int_t queryLineLen = backendQueryLine.len + r->args.len - 2;
+  /*内存池申请内存*/
+  ngx_buf_t *b = ngx_create_temp_buf(r->pool, queryLineLen);
+  if (b == NULL)
+  {
+    return NGX_ERROR;
+  }
+  /*last要指向请求的末尾*/
+  b->last = b->pos + queryLineLen;
+
+  /*snprintf*/
+  ngx_snprintf(b->pos, queryLineLen, (char *)backendQueryLine.data, &r->args);
+  /*ngx_chain_t结构，包含发送给上游服务器的请求*/
+  r->upstream->request_bufs = ngx_alloc_chain_link(r->pool);
+  if (r->upstream->request_bufs == NULL)
+  {
+    return NGX_ERROR;
+  }
+
+  /*在这里只包含1个ngx_buf_t缓冲区*/
+  r->upstream->request_bufs->buf = b;
+  r->upstream->request_bufs->next = NULL;
+
+  r->upstream->request_sent = 0;
+  r->upstream->header_sent = 0;
+
+  //header_hash不可以为0
+  r->header_hash = 1;
+
+  return NGX_OK;
+}
 
 static ngx_int_t ngx_http_myconfig_handler(ngx_http_request_t *r)
 {
@@ -108,7 +225,32 @@ static void *ngx_http_mytest_create_loc_conf(ngx_conf_t *cf)
     return NULL;
   }
 
+  /*以下简单的硬编码ngx_http_upstream_conf_t结构中的各成员，如超时时间，都设为1分钟，这也是
+    HTTP反向代理模块的默认值*/
   mycf->my_config_num = NGX_CONF_UNSET;
+  mycf->upstream.connect_timeout = 60000;
+  mycf->upstream.send_timeout = 60000;
+  mycf->upstream.read_timeout = 60000;
+  mycf->upstream.store_access = 0600;
+
+  /*实际上，buffering已经决定了将以固定大小的内存作为i缓冲区来转发上游的响应包体，这块固定缓冲区的
+    大小就是buffer_size。如果buffering为1，就会使用更多的内存缓存来不及发往下游的响应。例如，最
+    多使用bufs.num个缓冲区且每个缓冲区大小为bufs.size。另外，还会使用临时文件，临时文件的最大长度
+    为max_temp_file_size*/
+  mycf->upstream.buffering = 0;
+  mycf->upstream.bufs.num = 8;
+  mycf->upstream.bufs.size = ngx_pagesize;
+  mycf->upstream.buffer_size = ngx_pagesize;
+  mycf->upstream.busy_buffers_size = 2 * ngx_pagesize;
+  mycf->upstream.temp_file_write_size = 2 * ngx_pagesize;
+  mycf->upstream.max_temp_file_size = 1024 * 1024 * 1024;
+
+  /*upstream模块要求hide_headers成员必须要初始化(upstream在解析完上游服务器返回的包头时，会调用
+    ngx_http_upstream_process_headers方法按照hide_headers成员将本应转发给下游的一些HTTP头部
+    隐藏)，这里将它赋为NGX_CONF_UNSET_PTR，这是为了在merge合并配置项方法中使用upstream模块提供
+    的ngx_http_upstream_hide_headers_hash方法初始化hide_headers成员*/
+  mycf->upstream.hide_headers = NGX_CONF_UNSET_PTR;
+  mycf->upstream.pass_headers = NGX_CONF_UNSET_PTR;
 
   return mycf;
 }
@@ -117,7 +259,21 @@ static char * ngx_http_mytest_merge_loc_conf(ngx_conf_t *cf, void *parent, void 
 {
   ngx_http_mytest_conf_t *prev = (ngx_http_mytest_conf_t *)parent;
   ngx_http_mytest_conf_t *conf = (ngx_http_mytest_conf_t *)child;
-  ngx_conf_merge_str_value(conf->my_config_str, prev->my_config_num, "defaultstr");
+
+  ngx_hash_init_t hash;
+  hash.max_size = 100;
+  hash.bucket_size = 1024;
+  hash.name = "proxy_headers_hash";
+  if (ngx_http_upstream_hide_headers_hash(cf,
+                                          &conf->upstream,
+                                          &prev->upstream,
+                                          ngx_http_proxy_hide_headers,
+                                          &hash) != NGX_OK)
+  {
+    return NGX_CONF_ERROR;
+  }
+
+      //ngx_conf_merge_str_value(conf->my_config_str, prev->my_config_num, "defaultstr");
 
   return NGX_CONF_OK;
 }
@@ -150,14 +306,13 @@ static ngx_http_module_t ngx_http_mytest_module_ctx = {
   NULL,
   NULL,
   ngx_http_mytest_create_loc_conf,
-  NULL
+  ngx_http_mytest_merge_loc_conf
 };
 
 ngx_module_t ngx_http_mytest_module = {
   NGX_MODULE_V1,
   &ngx_http_mytest_module_ctx,
   ngx_http_mytest_command,
-  //  ngx_http_myexample_command,
   NGX_HTTP_MODULE,
   NULL,
   NULL,
