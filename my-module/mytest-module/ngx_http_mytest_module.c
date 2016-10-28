@@ -234,6 +234,10 @@ static ngx_int_t mytest_upstream_create_request(ngx_http_request_t *r)
   return NGX_OK;
 }
 
+static void mytest_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
+{
+}
+
 static ngx_int_t ngx_http_myconfig_handler(ngx_http_request_t *r)
 {
   int mode = 0;
@@ -242,6 +246,9 @@ static ngx_int_t ngx_http_myconfig_handler(ngx_http_request_t *r)
     //将配置项的upstream赋值给ngx_http_upstream_t中的conf成员
     ngx_http_mytest_conf_t *mycf = (ngx_http_mytest_conf_t *) ngx_http_get_module_loc_conf(r, ngx_http_mytest_module);
     r->upstream->conf = mycf->upstream;
+    r->upstream->create_request = mytest_upstream_create_request;
+    r->upstream->process_header = mytest_process_status_line;
+    r->upstream->finalize_request = mytest_finalize_request;
 
     //引用计数，HTTP框架只有在引用技术为0时才能真正地销毁请求
     r->main->count++;
